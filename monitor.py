@@ -8,8 +8,10 @@ push via ntfy.sh quand un concours s'ouvre aux engagements.
 
 import json
 import os
+import random
 import re
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -214,7 +216,12 @@ def main():
     session = requests.Session()
     session.headers.update(HEADERS)
 
-    print(f"\n📋 {len(concours_list)} concours à vérifier\n")
+    print(f"\n📋 {len(concours_list)} concours à vérifier")
+
+    # Petit délai aléatoire initial (0-15s) pour varier le timing entre les runs
+    jitter = random.uniform(0, 15)
+    print(f"   ⏳ Délai initial : {jitter:.0f}s\n")
+    time.sleep(jitter)
 
     changes = False
 
@@ -272,9 +279,8 @@ def main():
             "last_check": now,
         }
 
-        # Pause entre requêtes
-        import time
-        time.sleep(2)
+        # Pause aléatoire entre requêtes (1-4s)
+        time.sleep(random.uniform(1, 4))
 
     # Sauvegarder l'état
     save_state(state)
