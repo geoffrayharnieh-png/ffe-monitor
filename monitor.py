@@ -137,25 +137,28 @@ def fetch_concours(session: requests.Session, cid: str) -> dict:
 
 # ─── Notifications ntfy ──────────────────────────────────────────────────────
 def send_ntfy(title: str, message: str, url: str = "", priority: int = 5):
-    """Envoie une notification push via ntfy.sh."""
+    """Envoie une notification push via ntfy.sh (API JSON pour supporter les emojis)."""
     if not NTFY_TOPIC:
         print("  ⚠ NTFY_TOPIC non configuré — notification ignorée")
         return False
 
     try:
-        headers = {
-            "Title": title,
-            "Priority": str(priority),
-            "Tags": "horse,trophy",
+        payload = {
+            "topic": NTFY_TOPIC,
+            "title": title,
+            "message": message,
+            "priority": priority,
+            "tags": ["horse", "trophy"],
         }
         if url:
-            headers["Click"] = url
-            headers["Actions"] = f"view, Ouvrir la fiche, {url}"
+            payload["click"] = url
+            payload["actions"] = [
+                {"action": "view", "label": "Ouvrir la fiche", "url": url}
+            ]
 
         resp = requests.post(
-            f"https://ntfy.sh/{NTFY_TOPIC}",
-            data=message.encode("utf-8"),
-            headers=headers,
+            "https://ntfy.sh",
+            json=payload,
             timeout=10,
         )
         return resp.status_code == 200
