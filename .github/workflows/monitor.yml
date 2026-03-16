@@ -1,9 +1,9 @@
 name: FFE Compet Monitor
 
 on:
-  # Exécution automatique toutes les 5 minutes
+  # Toutes les 2 minutes, entre 6h et 22h heure française (4-21h UTC couvre hiver+été)
   schedule:
-    - cron: '*/5 * * * *'
+    - cron: '*/2 4-21 * * *'
 
   # Permet de lancer manuellement depuis l'onglet Actions
   workflow_dispatch:
