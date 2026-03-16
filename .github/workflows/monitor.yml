@@ -1,11 +1,7 @@
 name: FFE Compet Monitor
 
 on:
-  # Toutes les 2 minutes, entre 6h et 22h heure française (4-21h UTC couvre hiver+été)
-  schedule:
-    - cron: '*/2 4-21 * * *'
-
-  # Permet de lancer manuellement depuis l'onglet Actions
+  # Déclenché par cron-job.org toutes les 2 minutes (fiable)
   workflow_dispatch:
 
 jobs:
