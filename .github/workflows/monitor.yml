@@ -1,0 +1,49 @@
+name: FFE Compet Monitor
+
+on:
+  # Exécution automatique toutes les 5 minutes
+  schedule:
+    - cron: '*/5 * * * *'
+
+  # Permet de lancer manuellement depuis l'onglet Actions
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. Récupérer le code du repo
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # 2. Installer Python
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # 3. Installer les dépendances
+      - name: Install dependencies
+        run: pip install requests beautifulsoup4
+
+      # 4. Restaurer l'état précédent (cache entre les exécutions)
+      - name: Restore state
+        uses: actions/cache/restore@v4
+        with:
+          path: state.json
+          key: ffe-state-dummy
+          restore-keys: ffe-state-
+
+      # 5. Lancer le monitoring
+      - name: Run monitor
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: python monitor.py
+
+      # 6. Sauvegarder le nouvel état
+      - name: Save state
+        uses: actions/cache/save@v4
+        with:
+          path: state.json
+          key: ffe-state-${{ github.run_id }}
