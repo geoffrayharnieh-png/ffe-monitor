@@ -1,0 +1,48 @@
+name: FFE Auto-Engagement
+
+on:
+  # Déclenché par cron-job.org toutes les 2 minutes (fiable)
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. Récupérer le code du repo
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # 2. Installer Python
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # 3. Installer les dépendances
+      - name: Install dependencies
+        run: pip install requests beautifulsoup4
+
+      # 4. Restaurer l'état précédent (cache séparé de l'ancien monitor)
+      - name: Restore state
+        uses: actions/cache/restore@v4
+        with:
+          path: state_engage.json
+          key: ffe-engage-dummy
+          restore-keys: ffe-engage-
+
+      # 5. Lancer le monitoring + auto-engagement
+      - name: Run monitor
+        env:
+          NTFY_TOPIC:   ${{ secrets.NTFY_TOPIC }}
+          FFE_USERNAME: ${{ secrets.FFE_USERNAME }}
+          FFE_PASSWORD: ${{ secrets.FFE_PASSWORD }}
+          STATE_FILE:   state_engage.json
+        run: python monitor_engage.py
+
+      # 6. Sauvegarder le nouvel état
+      - name: Save state
+        uses: actions/cache/save@v4
+        with:
+          path: state_engage.json
+          key: ffe-engage-${{ github.run_id }}
