@@ -1,0 +1,30 @@
+{
+  "cavalier": {
+    "idCompo": "25_1_3_1_1",
+    "idLic": "228951"
+  },
+  "coach": {
+    "idCompo": "25_1_30_1_0",
+    "idLic": ""
+  },
+  "cheval": {
+    "idCompo": "25_1_1_1_1",
+    "idHorse": "1948585"
+  },
+  "engagements": [
+    {
+      "concours": "202635034",
+      "epreuves": [1],
+      "_aide": "Numéros d'épreuves (1, 2, 3...) tels qu'affichés sur FFE Compet"
+    }
+  ],
+  "max_engagements_par_run": 5,
+
+  "_aide": {
+    "cavalier": "Geoffrey HARNIEH — idLic=228951",
+    "cheval": "LOVER D'OZ H — idHorse=1948585",
+    "coach": "Vide = pas de coach",
+    "epreuves": "Ajoutez les numéros d'épreuves [1, 2, 3] par concours",
+    "epreuve_ids": "Optionnel : si la découverte auto échoue, ajoutez {\"1\": \"300254985\"} manuellement"
+  }
+}
