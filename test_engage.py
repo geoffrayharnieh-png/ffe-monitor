@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-TEST v2 — Engagement réel sur concours 202656038
-Épreuve 1 = 300255502, Épreuve 2 = 300255503
+TEST v3 — Engagement réel sur concours 202656038
+Simule le flow complet du navigateur (page + selecteurs + check + enter)
 """
 
 import json
@@ -81,6 +81,79 @@ def login_sso(session):
 
 
 def do_engagement(session, epreuve_id, epreuve_num):
+    """Simule le flow complet du navigateur."""
+
+    referer = f"{BASE_URL}/engagement/{CONCOURS_ID}/{epreuve_num}"
+    headers_xhr = {**XHR_HEADERS, "Referer": referer}
+
+    # ══════════════════════════════════════════════════════════════
+    # Étape 0 : Visiter la page d'engagement (établit le contexte serveur)
+    # ══════════════════════════════════════════════════════════════
+    print(f"\n    → Étape 0/4 : Visite page /engagement/{CONCOURS_ID}/{epreuve_num} ...")
+    page_url = f"{BASE_URL}/engagement/{CONCOURS_ID}/{epreuve_num}"
+    resp = session.get(page_url, timeout=20)
+    print(f"      HTTP {resp.status_code}, {len(resp.text)} chars")
+
+    if resp.status_code != 200:
+        return False, f"Page engagement HTTP {resp.status_code}"
+
+    time.sleep(0.5)
+
+    # ══════════════════════════════════════════════════════════════
+    # Étape 1 : POST /concours/selecteurs/test (charger les sélecteurs)
+    # ══════════════════════════════════════════════════════════════
+    print(f"\n    → Étape 1/4 : POST selecteurs/test ...")
+    test_url = f"{BASE_URL}/concours/selecteurs/test"
+    resp = session.post(test_url, headers=headers_xhr, timeout=20)
+    print(f"      HTTP {resp.status_code}, {len(resp.text)} chars")
+    if resp.text:
+        print(f"      Réponse : {resp.text[:200]}")
+
+    time.sleep(0.5)
+
+    # ══════════════════════════════════════════════════════════════
+    # Étape 1b : POST /concours/selecteurs/contest
+    # ══════════════════════════════════════════════════════════════
+    print(f"\n    → Étape 1b/4 : POST selecteurs/contest ...")
+    contest_url = f"{BASE_URL}/concours/selecteurs/contest"
+    resp = session.post(contest_url, headers=headers_xhr, timeout=20)
+    print(f"      HTTP {resp.status_code}, {len(resp.text)} chars")
+    if resp.text:
+        print(f"      Réponse : {resp.text[:200]}")
+
+    time.sleep(0.5)
+
+    # ══════════════════════════════════════════════════════════════
+    # Étape 2 : GET /composition/translate (résolution noms)
+    # ══════════════════════════════════════════════════════════════
+    print(f"\n    → Étape 2/4 : GET composition/translate ...")
+
+    translate_payload = json.dumps({
+        "licensees": json.dumps([
+            {"idCompo": CAVALIER["idCompo"], "idLic": str(CAVALIER["idLic"])},
+            {"idCompo": COACH["idCompo"],    "idLic": str(COACH["idLic"])},
+        ], separators=(",", ":")),
+        "horses": json.dumps([
+            {"idCompo": CHEVAL["idCompo"], "idHorse": str(CHEVAL["idHorse"])},
+        ], separators=(",", ":")),
+    }, separators=(",", ":"))
+
+    translate_url = (
+        f"{BASE_URL}/composition/translate"
+        f"/{urllib.parse.quote(translate_payload, safe='')}"
+    )
+    resp = session.get(translate_url, headers=headers_xhr, timeout=20)
+    print(f"      HTTP {resp.status_code}")
+    if resp.text:
+        print(f"      Réponse : {resp.text[:300]}")
+
+    time.sleep(0.5)
+
+    # ══════════════════════════════════════════════════════════════
+    # Étape 3 : GET /composition/check (pré-validation)
+    # ══════════════════════════════════════════════════════════════
+    print(f"\n    → Étape 3/4 : GET composition/check ...")
+
     cavaliers_json = json.dumps([
         {"idCompo": CAVALIER["idCompo"], "idLic": str(CAVALIER["idLic"])},
         {"idCompo": COACH["idCompo"],    "idLic": str(COACH["idLic"])},
@@ -97,11 +170,6 @@ def do_engagement(session, epreuve_id, epreuve_num):
         "checkAttestation": 0,
     }, separators=(",", ":"))
 
-    referer = f"{BASE_URL}/engagement/{CONCOURS_ID}/{epreuve_num}"
-    headers = {**XHR_HEADERS, "Referer": referer}
-
-    # ── Étape 1 : check ──
-    print(f"\n    → Étape 1/2 : composition/check ...")
     check_url = (
         f"{BASE_URL}/composition/check/{epreuve_id}"
         f"/{urllib.parse.quote(cavaliers_json, safe='')}"
@@ -112,7 +180,7 @@ def do_engagement(session, epreuve_id, epreuve_num):
         f"&"
     )
 
-    resp = session.get(check_url, headers=headers, timeout=20)
+    resp = session.get(check_url, headers=headers_xhr, timeout=20)
     print(f"      HTTP {resp.status_code}")
     print(f"      Réponse : {resp.text[:500]}")
 
@@ -121,8 +189,11 @@ def do_engagement(session, epreuve_id, epreuve_num):
 
     time.sleep(1)
 
-    # ── Étape 2 : requestEnter ──
-    print(f"\n    → Étape 2/2 : engagement/requestEnter ...")
+    # ══════════════════════════════════════════════════════════════
+    # Étape 4 : GET /engagement/requestEnter (engagement réel!)
+    # ══════════════════════════════════════════════════════════════
+    print(f"\n    → Étape 4/4 : GET engagement/requestEnter ...")
+
     enter_url = (
         f"{BASE_URL}/engagement/requestEnter/{epreuve_id}"
         f"/{urllib.parse.quote(cavaliers_json, safe='')}"
@@ -131,14 +202,13 @@ def do_engagement(session, epreuve_id, epreuve_num):
         f"/0?checkMore=1"
     )
 
-    resp = session.get(enter_url, headers=headers, timeout=20)
+    resp = session.get(enter_url, headers=headers_xhr, timeout=20)
     print(f"      HTTP {resp.status_code}")
     print(f"      Réponse : {resp.text[:500]}")
 
     if resp.status_code != 200:
         return False, f"RequestEnter HTTP {resp.status_code} : {resp.text[:200]}"
 
-    # Vérifier erreur dans la réponse JSON
     try:
         data = resp.json()
         if isinstance(data, dict):
@@ -167,9 +237,10 @@ def send_ntfy(title, message, priority=5):
 
 def main():
     print("=" * 60)
-    print(f"  TEST v2 — Concours {CONCOURS_ID}")
+    print(f"  TEST v3 — Concours {CONCOURS_ID}")
     print(f"  Épreuve 1 → {EPREUVES[1]}")
     print(f"  Épreuve 2 → {EPREUVES[2]}")
+    print(f"  Flow complet : page → selecteurs → translate → check → enter")
     print("=" * 60)
 
     session = requests.Session()
@@ -181,17 +252,19 @@ def main():
 
     if not login_sso(session):
         print("❌ Login échoué")
-        send_ntfy("❌ TEST v2 : Login échoué", "Impossible de se connecter")
+        send_ntfy("❌ TEST v3 : Login échoué", "Impossible de se connecter")
         sys.exit(1)
 
     resultats = []
     for num, eid in EPREUVES.items():
-        print(f"\n  🏇 Épreuve #{num} (id={eid})")
+        print(f"\n{'='*50}")
+        print(f"  🏇 Épreuve #{num} (id={eid})")
+        print(f"{'='*50}")
         success, message = do_engagement(session, eid, num)
         emoji = "✅" if success else "❌"
-        print(f"  {emoji} {message}")
+        print(f"\n  {emoji} {message}")
         resultats.append((num, success, message))
-        time.sleep(1)
+        time.sleep(2)
 
     # Résumé
     print(f"\n{'='*60}")
@@ -201,7 +274,7 @@ def main():
         print(f"  {'✅' if success else '❌'} Épreuve #{num} : {msg}")
 
     resume = "\n".join(f"{'✅' if s else '❌'} Épr. #{n} : {m}" for n, s, m in resultats)
-    send_ntfy("🧪 TEST v2 terminé", f"Concours {CONCOURS_ID}\n{resume}")
+    send_ntfy("🧪 TEST v3 terminé", f"Concours {CONCOURS_ID}\n{resume}")
 
     print(f"\n✅ Test terminé.\n")
 
