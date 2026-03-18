@@ -1,30 +1,52 @@
 {
-  "cavalier": {
+  "cavalier_defaut": {
     "idCompo": "25_1_3_1_1",
     "idLic": "228951"
   },
-  "coach": {
+  "coach_defaut": {
     "idCompo": "25_1_30_1_0",
     "idLic": ""
   },
-  "cheval": {
+  "cheval_defaut": {
     "idCompo": "25_1_1_1_1",
     "idHorse": "1948585"
   },
+
   "engagements": [
     {
       "concours": "202635034",
-      "epreuves": [1],
-      "_aide": "Numéros d'épreuves (1, 2, 3...) tels qu'affichés sur FFE Compet"
+      "epreuves": [
+        {"num": 1}
+      ]
     }
   ],
+
   "max_engagements_par_run": 5,
 
   "_aide": {
-    "cavalier": "Geoffrey HARNIEH — idLic=228951",
-    "cheval": "LOVER D'OZ H — idHorse=1948585",
-    "coach": "Vide = pas de coach",
-    "epreuves": "Ajoutez les numéros d'épreuves [1, 2, 3] par concours",
-    "epreuve_ids": "Optionnel : si la découverte auto échoue, ajoutez {\"1\": \"300254985\"} manuellement"
+    "_1_cavaliers_disponibles": {
+      "Geoffrey HARNIEH":  {"idCompo": "25_1_3_1_1", "idLic": "228951"},
+      "Loic HARNIEH":      {"idCompo": "25_1_3_1_1", "idLic": "228950"},
+      "Ninon LAVOQUET":    {"idCompo": "25_1_3_1_1", "idLic": "2007134"}
+    },
+    "_2_chevaux_disponibles": {
+      "LOVER D'OZ H":        {"idCompo": "25_1_1_1_1", "idHorse": "1948585"},
+      "CALAMYTY DE GARLAN":  {"idCompo": "25_1_1_1_1", "idHorse": "1612287"},
+      "KAHIK'O H":           {"idCompo": "25_1_1_1_1", "idHorse": "1946122"}
+    },
+    "_3_coach": {
+      "Pas de coach": {"idCompo": "25_1_30_1_0", "idLic": ""}
+    },
+    "_4_engageur": "HARNIEH MARYSE (2368408W)",
+    "_5_combinaisons_exemples": [
+      "Geoffrey + LOVER D'OZ H (défaut) :  {\"num\": 1}",
+      "Geoffrey + CALAMYTY :               {\"num\": 2, \"cheval\": {\"idCompo\": \"25_1_1_1_1\", \"idHorse\": \"1612287\"}}",
+      "Loic + LOVER D'OZ H :               {\"num\": 3, \"cavalier\": {\"idCompo\": \"25_1_3_1_1\", \"idLic\": \"228950\"}}",
+      "Loic + CALAMYTY :                    {\"num\": 4, \"cavalier\": {\"idCompo\": \"25_1_3_1_1\", \"idLic\": \"228950\"}, \"cheval\": {\"idCompo\": \"25_1_1_1_1\", \"idHorse\": \"1612287\"}}",
+      "Ninon + KAHIK'O H :                  {\"num\": 5, \"cavalier\": {\"idCompo\": \"25_1_3_1_1\", \"idLic\": \"2007134\"}, \"cheval\": {\"idCompo\": \"25_1_1_1_1\", \"idHorse\": \"1946122\"}}",
+      "Ninon + LOVER D'OZ H :               {\"num\": 6, \"cavalier\": {\"idCompo\": \"25_1_3_1_1\", \"idLic\": \"2007134\"}}"
+    ],
+    "_6_epreuve_ids": "Si la découverte auto échoue, ajoutez un champ epreuve_ids au concours : {\"1\": \"300255502\", \"2\": \"300255503\"}",
+    "_7_comment_trouver_nouveaux_ids": "F12 → Network → Fetch/XHR → engager → regarder /composition/check/ dans l'URL → idLic = cavalier, idHorse = cheval"
   }
 }
