@@ -14,31 +14,22 @@
 
   "engagements": [
     {
-      "concours": "202635034",
+      "concours": "202629017",
       "epreuves": [
         {
-          "num": 6,
+          "num": 1,
           "_": "Geoffrey + LOVER D'OZ H (défaut)"
         },
         {
-          "num": 12,
+          "num": 2,
           "cheval": {"idCompo": "25_1_1_1_1", "idHorse": "1946122"},
           "_": "Geoffrey + KAHIK'O H"
         },
         {
-          "num": 13,
+          "num": 5,
           "cavalier": {"idCompo": "25_1_3_1_1", "idLic": "228950"},
           "cheval": {"idCompo": "25_1_1_1_1", "idHorse": "1946122"},
           "_": "Loic + KAHIK'O H"
-        },
-        {
-          "num": 14,
-          "cheval": {"idCompo": "25_1_1_1_1", "idHorse": "1612287"},
-          "_": "Geoffrey + CALAMYTY DE GARLAN"
-        },
-        {
-          "num": 15,
-          "_": "Geoffrey + LOVER D'OZ H (défaut)"
         }
       ]
     }
