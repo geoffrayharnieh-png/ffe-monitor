@@ -5,6 +5,8 @@ FFE Compet Monitor + Auto-Engagement — Version Cloud (GitHub Actions)
 Vérifie le statut des concours, notifie via ntfy, et engage
 automatiquement par requêtes HTTP (sans navigateur ni Selenium).
 
+Supporte cavalier/cheval différent par épreuve.
+
 Flow engagement validé :
   0. GET /engagement/{concours}/{num}          → contexte serveur
   1. POST /concours/selecteurs/test            → chargement sélecteurs
@@ -221,9 +223,7 @@ def fetch_concours(session: requests.Session, cid: str) -> dict:
 # ═══════════════════════════════════════════════════════════════════════════════
 def discover_epreuve_id(session: requests.Session, concours_id: str, epreuve_num: int) -> str:
     """
-    Découvre l'ID interne d'une épreuve en visitant sa page d'engagement
-    et en cherchant dans le HTML/JS.
-
+    Découvre l'ID interne d'une épreuve en visitant sa page d'engagement.
     Retourne l'ID ou "" si introuvable.
     """
     url = f"{BASE_URL}/engagement/{concours_id}/{epreuve_num}"
@@ -235,27 +235,23 @@ def discover_epreuve_id(session: requests.Session, concours_id: str, epreuve_num
         return ""
 
     text = resp.text
-
-    # Les epreuve_id internes commencent par 3 et font 9 chiffres (ex: 300255502)
-    # Le concours_id commence par 2 → on filtre
     candidates = set()
 
     # Pattern 1 : dans les URLs composition/check ou requestEnter
     for m in re.finditer(r'/(?:composition/check|requestEnter)/(\d{9,})', text):
         eid = m.group(1)
-        if not eid.startswith("20"):  # Exclure les concours_id
+        if not eid.startswith("20"):
             candidates.add(eid)
 
     if candidates:
         return candidates.pop()
 
-    # Pattern 2 : variables JS contenant l'ID épreuve
+    # Pattern 2 : variables JS
     for pattern in [
         r'epreuveId\s*[=:]\s*["\']?(\d{9,})',
         r'epreuve_id\s*[=:]\s*["\']?(\d{9,})',
         r'idEpreuve\s*[=:]\s*["\']?(\d{9,})',
         r'"id"\s*:\s*(\d{9,})',
-        r"'id'\s*:\s*(\d{9,})",
     ]:
         for m in re.finditer(pattern, text):
             eid = m.group(1)
@@ -364,7 +360,6 @@ def do_engagement(
         time.sleep(0.5)
 
         # ── Étape 4 : requestEnter (engagement réel!) ──
-        # URL : /requestEnter/{id}/{cavaliers}/{chevaux}/{}/{params}/0?checkMore=1
         enter_url = (
             f"{BASE_URL}/engagement/requestEnter/{epreuve_id}"
             f"/{ffe_quote(cavaliers_json)}"
@@ -378,7 +373,6 @@ def do_engagement(
         if resp.status_code != 200:
             return False, f"RequestEnter HTTP {resp.status_code} : {resp.text[:200]}"
 
-        # Vérifier la réponse
         try:
             data = resp.json()
             if isinstance(data, dict):
@@ -466,13 +460,13 @@ def process_engagements(session: requests.Session, concours_id: str, state: dict
         print("    ℹ Pas de fichier engagements.json")
         return
 
-    max_per_run = engage_config.get("max_engagements_par_run", 5)
-    cavalier    = engage_config.get("cavalier")
-    coach       = engage_config.get("coach", {"idCompo": "25_1_30_1_0", "idLic": ""})
-    cheval      = engage_config.get("cheval")
+    max_per_run     = engage_config.get("max_engagements_par_run", 5)
+    cavalier_defaut = engage_config.get("cavalier_defaut")
+    coach_defaut    = engage_config.get("coach_defaut", {"idCompo": "25_1_30_1_0", "idLic": ""})
+    cheval_defaut   = engage_config.get("cheval_defaut")
 
-    if not cavalier or not cheval:
-        print("    ❌ Cavalier ou cheval non configuré")
+    if not cavalier_defaut or not cheval_defaut:
+        print("    ❌ cavalier_defaut ou cheval_defaut manquant dans engagements.json")
         return
 
     # Trouver la config pour ce concours
@@ -486,28 +480,44 @@ def process_engagements(session: requests.Session, concours_id: str, state: dict
         print(f"    ℹ Pas d'engagement configuré pour {concours_id}")
         return
 
-    epreuves_voulues = target.get("epreuves", [])
-    if not epreuves_voulues:
+    epreuves_config = target.get("epreuves", [])
+    if not epreuves_config:
         return
 
     # Anti-doublon
     engaged_key = f"engaged_{concours_id}"
     already_engaged = state.get(engaged_key, [])
-    epreuves_restantes = [e for e in epreuves_voulues if e not in already_engaged]
 
-    if not epreuves_restantes:
+    # Filtrer les épreuves déjà engagées
+    epreuves_todo = []
+    for ep in epreuves_config:
+        # Support ancien format (juste un numéro) et nouveau format (dict)
+        if isinstance(ep, int):
+            ep = {"num": ep}
+        num = ep.get("num")
+        if num and num not in already_engaged:
+            epreuves_todo.append(ep)
+
+    if not epreuves_todo:
         print(f"    ✓ Toutes les épreuves déjà engagées pour {concours_id}")
         return
 
-    epreuves_restantes = epreuves_restantes[:max_per_run]
+    epreuves_todo = epreuves_todo[:max_per_run]
     manual_ids = target.get("epreuve_ids", {})
 
-    print(f"\n  🎯 AUTO-ENGAGEMENT : {len(epreuves_restantes)} épreuve(s)")
+    print(f"\n  🎯 AUTO-ENGAGEMENT : {len(epreuves_todo)} épreuve(s)")
     print(f"     Concours : {concours_id}")
 
     engagement_count = 0
 
-    for epreuve_num in epreuves_restantes:
+    for ep in epreuves_todo:
+        epreuve_num = ep["num"]
+
+        # ── Résoudre cavalier / cheval / coach (défaut ou surcharge) ──
+        cavalier = ep.get("cavalier", cavalier_defaut)
+        cheval   = ep.get("cheval",   cheval_defaut)
+        coach    = ep.get("coach",    coach_defaut)
+
         # ── Trouver l'ID interne ──
         epreuve_id = manual_ids.get(str(epreuve_num), "")
 
@@ -524,7 +534,10 @@ def process_engagements(session: requests.Session, concours_id: str, state: dict
             )
             continue
 
+        cav_label = cavalier.get("idLic", "?")
+        che_label = cheval.get("idHorse", "?")
         print(f"\n    🏇 Épreuve #{epreuve_num} (id={epreuve_id})")
+        print(f"       Cavalier: {cav_label} | Cheval: {che_label}")
 
         # ── Engagement ──
         success, message = do_engagement(
@@ -542,8 +555,8 @@ def process_engagements(session: requests.Session, concours_id: str, state: dict
                 title=f"✅ Engagement réussi !",
                 message=(
                     f"Concours {concours_id} — Épreuve #{epreuve_num}\n"
-                    f"Cavalier : Geoffrey HARNIEH\n"
-                    f"Cheval : LOVER D'OZ H\n"
+                    f"Cavalier : {cav_label}\n"
+                    f"Cheval : {che_label}\n"
                     f"{message}"
                 ),
                 url=f"{BASE_URL}/engagement/{concours_id}/{epreuve_num}",
@@ -557,10 +570,10 @@ def process_engagements(session: requests.Session, concours_id: str, state: dict
                 tags=["x", "horse"],
             )
 
-        if epreuve_num != epreuves_restantes[-1]:
+        if ep != epreuves_todo[-1]:
             time.sleep(random.uniform(1, 3))
 
-    print(f"\n    📊 {engagement_count}/{len(epreuves_restantes)} engagement(s) réussi(s)")
+    print(f"\n    📊 {engagement_count}/{len(epreuves_todo)} engagement(s) réussi(s)")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -581,7 +594,6 @@ def main():
     session = requests.Session()
     session.headers.update(HEADERS)
 
-    # Login SSO
     logged_in = login_sso(session)
 
     print(f"\n📋 {len(concours_list)} concours à vérifier")
