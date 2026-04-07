@@ -9,34 +9,56 @@
   },
   "cheval_defaut": {
     "idCompo": "25_1_1_1_1",
-    "idHorse": "1948585"
+    "idHorse": "1612287"
   },
-
   "engagements": [
     {
-      "concours": "202629017",
+      "concours": "202622019",
       "epreuves": [
         {
-          "num": 1,
-          "_": "Geoffrey + LOVER D'OZ H (défaut)"
-        },
-        {
-          "num": 2,
+          "num": 8,
           "cheval": {"idCompo": "25_1_1_1_1", "idHorse": "1946122"},
           "_": "Geoffrey + KAHIK'O H"
         },
         {
-          "num": 5,
+          "num": 9,
           "cavalier": {"idCompo": "25_1_3_1_1", "idLic": "228950"},
           "cheval": {"idCompo": "25_1_1_1_1", "idHorse": "1946122"},
           "_": "Loic + KAHIK'O H"
+        },
+        {
+          "num": 12,
+          "_": "Geoffrey + CALAMYTY DE GARLAN (défaut)"
+        }
+      ]
+    },
+    {
+      "concours": "202635027",
+      "epreuves": [
+        {
+          "num": 7,
+          "cheval": {"idCompo": "25_1_1_1_1", "idHorse": "1946122"},
+          "_": "Geoffrey + KAHIK'O H"
+        },
+        {
+          "num": 12,
+          "cheval": {"idCompo": "25_1_1_1_1", "idHorse": "1946122"},
+          "_": "Geoffrey + KAHIK'O H"
+        },
+        {
+          "num": 14,
+          "cavalier": {"idCompo": "25_1_3_1_1", "idLic": "228950"},
+          "cheval": {"idCompo": "25_1_1_1_1", "idHorse": "1946122"},
+          "_": "Loic + KAHIK'O H"
+        },
+        {
+          "num": 16,
+          "_": "Geoffrey + CALAMYTY DE GARLAN (défaut)"
         }
       ]
     }
   ],
-
-  "max_engagements_par_run": 5,
-
+  "max_engagements_par_run": 10,
   "_aide": {
     "_1_cavaliers_disponibles": {
       "Geoffrey HARNIEH":  {"idCompo": "25_1_3_1_1", "idLic": "228951"},
@@ -53,12 +75,12 @@
     },
     "_4_engageur": "HARNIEH MARYSE (2368408W)",
     "_5_combinaisons_exemples": [
-      "Geoffrey + LOVER D'OZ H (défaut) :  {\"num\": 1}",
-      "Geoffrey + CALAMYTY :               {\"num\": 2, \"cheval\": {\"idCompo\": \"25_1_1_1_1\", \"idHorse\": \"1612287\"}}",
-      "Loic + LOVER D'OZ H :               {\"num\": 3, \"cavalier\": {\"idCompo\": \"25_1_3_1_1\", \"idLic\": \"228950\"}}",
-      "Loic + CALAMYTY :                    {\"num\": 4, \"cavalier\": {\"idCompo\": \"25_1_3_1_1\", \"idLic\": \"228950\"}, \"cheval\": {\"idCompo\": \"25_1_1_1_1\", \"idHorse\": \"1612287\"}}",
-      "Ninon + KAHIK'O H :                  {\"num\": 5, \"cavalier\": {\"idCompo\": \"25_1_3_1_1\", \"idLic\": \"2007134\"}, \"cheval\": {\"idCompo\": \"25_1_1_1_1\", \"idHorse\": \"1946122\"}}",
-      "Ninon + LOVER D'OZ H :               {\"num\": 6, \"cavalier\": {\"idCompo\": \"25_1_3_1_1\", \"idLic\": \"2007134\"}}"
+      "Geoffrey + CALAMYTY (défaut) :  {\"num\": 1}",
+      "Geoffrey + LOVER D'OZ H :       {\"num\": 2, \"cheval\": {\"idCompo\": \"25_1_1_1_1\", \"idHorse\": \"1948585\"}}",
+      "Loic + CALAMYTY :               {\"num\": 3, \"cavalier\": {\"idCompo\": \"25_1_3_1_1\", \"idLic\": \"228950\"}}",
+      "Loic + LOVER D'OZ H :           {\"num\": 4, \"cavalier\": {\"idCompo\": \"25_1_3_1_1\", \"idLic\": \"228950\"}, \"cheval\": {\"idCompo\": \"25_1_1_1_1\", \"idHorse\": \"1948585\"}}",
+      "Ninon + KAHIK'O H :             {\"num\": 5, \"cavalier\": {\"idCompo\": \"25_1_3_1_1\", \"idLic\": \"2007134\"}, \"cheval\": {\"idCompo\": \"25_1_1_1_1\", \"idHorse\": \"1946122\"}}",
+      "Ninon + LOVER D'OZ H :          {\"num\": 6, \"cavalier\": {\"idCompo\": \"25_1_3_1_1\", \"idLic\": \"2007134\"}, \"cheval\": {\"idCompo\": \"25_1_1_1_1\", \"idHorse\": \"1948585\"}}"
     ],
     "_6_epreuve_ids": "Si la découverte auto échoue, ajoutez un champ epreuve_ids au concours : {\"1\": \"300255502\", \"2\": \"300255503\"}",
     "_7_comment_trouver_nouveaux_ids": "F12 → Network → Fetch/XHR → engager → regarder /composition/check/ dans l'URL → idLic = cavalier, idHorse = cheval"
