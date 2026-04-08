@@ -13,26 +13,6 @@
   },
   "engagements": [
     {
-      "concours": "202622019",
-      "epreuves": [
-        {
-          "num": 8,
-          "cheval": {"idCompo": "25_1_1_1_1", "idHorse": "1946122"},
-          "_": "Geoffrey + KAHIK'O H"
-        },
-        {
-          "num": 9,
-          "cavalier": {"idCompo": "25_1_3_1_1", "idLic": "228950"},
-          "cheval": {"idCompo": "25_1_1_1_1", "idHorse": "1946122"},
-          "_": "Loic + KAHIK'O H"
-        },
-        {
-          "num": 12,
-          "_": "Geoffrey + CALAMYTY DE GARLAN (défaut)"
-        }
-      ]
-    },
-    {
       "concours": "202635027",
       "epreuves": [
         {
