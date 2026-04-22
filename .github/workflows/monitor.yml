@@ -21,6 +21,7 @@ jobs:
           pip install requests beautifulsoup4 playwright
           playwright install chromium
           playwright install-deps chromium
+          sudo apt-get install -y xvfb
 
       - name: Restore state
         uses: actions/cache/restore@v4
@@ -32,7 +33,7 @@ jobs:
       - name: Run monitor
         env:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
-        run: python monitor.py
+        run: xvfb-run --auto-servernum python monitor.py
 
       - name: Save state
         uses: actions/cache/save@v4
