@@ -172,15 +172,30 @@ def fetch_all_concours(concours_list: list) -> dict:
 
             try:
                 page.goto(url, wait_until="domcontentloaded", timeout=30000)
-                # Attendre que le card-header apparaisse (signe que la page est chargée)
-                try:
-                    page.wait_for_selector("div.card-header", timeout=10000)
-                except Exception:
-                    time.sleep(5)  # fallback : attendre 5s
 
-                html = page.content()
+                # Attendre que Cloudflare se résolve sur cette page aussi
+                resolved = False
+                for attempt in range(20):  # max 40 secondes
+                    html = page.content()
+                    html_lower = html.lower()
 
-                if len(html) < 500 or "challenge-platform" in html.lower():
+                    # Vérifier si on a le vrai contenu (card-header = page concours)
+                    if "card-header" in html_lower or "concours n" in html_lower:
+                        resolved = True
+                        break
+
+                    # Si pas de challenge Cloudflare mais page courte, attendre un peu
+                    if "challenge" not in html_lower and "cloudflare" not in html_lower and len(html) > 1000:
+                        resolved = True
+                        break
+
+                    time.sleep(2)
+
+                if not resolved:
+                    print(f"  ⚠ {cid} — Cloudflare non résolu (HTML: {len(html)} chars)")
+                    # Afficher un extrait pour debug
+                    clean = re.sub(r'<[^>]+>', ' ', html[:500]).strip()
+                    print(f"      Extrait : {clean[:200]}")
                     results[cid] = {
                         "id": cid, "url": url, "name": "", "status_code": "INCONNU",
                         "status": "Inconnu", "ouvert": False, "dates": "", "cloture": "",
@@ -188,6 +203,7 @@ def fetch_all_concours(concours_list: list) -> dict:
                         "checked_at": datetime.now().strftime("%d/%m %H:%M:%S"),
                     }
                 else:
+                    html = page.content()
                     results[cid] = parse_concours_html(html, cid, url)
 
             except Exception as e:
