@@ -1,12 +1,9 @@
 #!/usr/bin/env python3
 """
-FFE Compet Monitor — Version Cloud (GitHub Actions)
-=====================================================
-Vérifie le statut des concours et envoie une notification
-push via ntfy.sh quand un concours s'ouvre aux engagements.
-
-Utilise curl_cffi pour imiter le fingerprint TLS de Chrome
-et contourner la détection anti-bot de la FFE.
+FFE Compet Monitor — Version Cloud (GitHub Actions + Playwright)
+=================================================================
+Utilise un vrai navigateur Chrome headless (Playwright) pour
+contourner la protection Cloudflare de la FFE.
 """
 
 import json
@@ -19,15 +16,13 @@ from datetime import datetime
 from pathlib import Path
 
 import requests  # pour ntfy uniquement
-from curl_cffi import requests as cffi_requests  # pour FFE (anti-403)
 from bs4 import BeautifulSoup
 
 # ─── Configuration ────────────────────────────────────────────────────────────
-CONCOURS_URL = "https://ffecompet.ffe.com/concours/"
+CONCOURS_URL  = "https://ffecompet.ffe.com/concours/"
 CONCOURS_FILE = Path(__file__).parent / "concours.json"
 STATE_FILE    = Path(__file__).parent / "state.json"
-
-NTFY_TOPIC = os.environ.get("NTFY_TOPIC", "")
+NTFY_TOPIC    = os.environ.get("NTFY_TOPIC", "")
 
 STATUS_MAP = {
     "ouvert aux engagements": ("OUVERT",     "Ouvert aux engagements"),
@@ -40,7 +35,7 @@ STATUS_MAP = {
 }
 
 
-# ─── Scraping (avec curl_cffi pour contourner le 403) ─────────────────────────
+# ─── Parsing HTML ─────────────────────────────────────────────────────────────
 def detect_status(text: str) -> tuple:
     lower = text.lower()
     for pattern, (code, label) in STATUS_MAP.items():
@@ -49,23 +44,15 @@ def detect_status(text: str) -> tuple:
     return "INCONNU", "Inconnu"
 
 
-def fetch_concours(session, cid: str) -> dict:
-    url = f"{CONCOURS_URL}{cid}"
+def parse_concours_html(html: str, cid: str, url: str) -> dict:
     info = {
         "id": cid, "url": url, "name": "", "status_code": "INCONNU",
         "status": "Inconnu", "ouvert": False, "dates": "", "cloture": "",
-        "lieu": "", "organisateur": "", "epreuves": 0, "error": None,
+        "epreuves": 0, "error": None,
         "checked_at": datetime.now().strftime("%d/%m %H:%M:%S"),
     }
 
-    try:
-        resp = session.get(url, timeout=20)
-        resp.raise_for_status()
-    except Exception as e:
-        info["error"] = str(e)[:120]
-        return info
-
-    soup = BeautifulSoup(resp.text, "html.parser")
+    soup = BeautifulSoup(html, "html.parser")
 
     # ── Header : nom + statut ──
     header = soup.find("div", class_="card-header")
@@ -106,9 +93,8 @@ def fetch_concours(session, cid: str) -> dict:
     if m:
         info["cloture"] = m.group(1)
 
-    # ── Fallback statut (header seulement, pas toute la page) ──
+    # ── Fallback statut (header uniquement) ──
     if info["status_code"] == "INCONNU" and header:
-        # Ne chercher que dans le header pour éviter les faux positifs
         code, label = detect_status(header.get_text(separator=" "))
         info["status_code"] = code
         info["status"] = label
@@ -128,10 +114,99 @@ def fetch_concours(session, cid: str) -> dict:
     return info
 
 
+# ─── Playwright : navigateur headless ─────────────────────────────────────────
+def fetch_all_concours(concours_list: list) -> dict:
+    """Lance Chrome headless, passe Cloudflare, scrape chaque concours."""
+    from playwright.sync_api import sync_playwright
+
+    results = {}
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(
+            headless=True,
+            args=["--no-sandbox", "--disable-dev-shm-usage",
+                  "--disable-blink-features=AutomationControlled"],
+        )
+
+        context = browser.new_context(
+            viewport={"width": 1920, "height": 1080},
+            user_agent=(
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/124.0.0.0 Safari/537.36"
+            ),
+            locale="fr-FR",
+            timezone_id="Europe/Paris",
+        )
+
+        context.add_init_script("""
+            Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+            Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3]});
+        """)
+
+        page = context.new_page()
+
+        # ── Passer Cloudflare via la page d'accueil ──
+        print("  🌐 Résolution du challenge Cloudflare...")
+        try:
+            page.goto("https://ffecompet.ffe.com/", timeout=60000)
+            # Attendre jusqu'à 30s que Cloudflare se résolve
+            for i in range(15):
+                content = page.content().lower()
+                if "recherche concours" in content or "ffecompet" in content:
+                    if "challenge" not in content and "cloudflare" not in content:
+                        print(f"  ✅ Cloudflare résolu en {(i+1)*2}s")
+                        break
+                time.sleep(2)
+            else:
+                print("  ⚠ Cloudflare possiblement non résolu — on essaie quand même")
+        except Exception as e:
+            print(f"  ⚠ Erreur page d'accueil : {e}")
+
+        time.sleep(random.uniform(1, 3))
+
+        # ── Visiter chaque concours ──
+        for cid in concours_list:
+            cid = str(cid).strip()
+            url = f"{CONCOURS_URL}{cid}"
+
+            try:
+                page.goto(url, timeout=20000)
+                # Attendre que le contenu se charge
+                page.wait_for_load_state("networkidle", timeout=15000)
+                time.sleep(2)
+
+                html = page.content()
+
+                if len(html) < 500 or "challenge-platform" in html.lower():
+                    results[cid] = {
+                        "id": cid, "url": url, "name": "", "status_code": "INCONNU",
+                        "status": "Inconnu", "ouvert": False, "dates": "", "cloture": "",
+                        "epreuves": 0, "error": "Cloudflare bloqué",
+                        "checked_at": datetime.now().strftime("%d/%m %H:%M:%S"),
+                    }
+                else:
+                    results[cid] = parse_concours_html(html, cid, url)
+
+            except Exception as e:
+                results[cid] = {
+                    "id": cid, "url": url, "name": "", "status_code": "INCONNU",
+                    "status": "Inconnu", "ouvert": False, "dates": "", "cloture": "",
+                    "epreuves": 0, "error": str(e)[:120],
+                    "checked_at": datetime.now().strftime("%d/%m %H:%M:%S"),
+                }
+
+            time.sleep(random.uniform(2, 5))
+
+        browser.close()
+
+    return results
+
+
 # ─── Notifications ntfy ──────────────────────────────────────────────────────
 def send_ntfy(title: str, message: str, url: str = "", priority: int = 5):
     if not NTFY_TOPIC:
-        print("  ⚠ NTFY_TOPIC non configuré — notification ignorée")
+        print("  ⚠ NTFY_TOPIC non configuré")
         return False
     try:
         payload = {
@@ -184,14 +259,14 @@ def main():
 
     state = load_state()
 
-    # Créer une session curl_cffi qui imite Chrome
-    session = cffi_requests.Session(impersonate="chrome")
-
     print(f"\n📋 {len(concours_list)} concours à vérifier")
 
-    jitter = random.uniform(0, 15)
+    jitter = random.uniform(0, 10)
     print(f"   ⏳ Délai initial : {jitter:.0f}s\n")
     time.sleep(jitter)
+
+    # Lancer le navigateur et vérifier tous les concours
+    all_results = fetch_all_concours(concours_list)
 
     changes = False
 
@@ -201,41 +276,42 @@ def main():
         was_ouvert = prev.get("ouvert", False)
         prev_code = prev.get("status_code", "INCONNU")
 
-        info = fetch_concours(session, cid)
-        name = info["name"] or f"Fiche Concours n°{cid}"
+        info = all_results.get(cid, {})
+        name = info.get("name") or f"Fiche Concours n°{cid}"
 
         if info.get("error"):
             print(f"  ⚠ {name} — Erreur : {info['error']}")
         else:
-            print(f"  {'🟢' if info['ouvert'] else '⚪'} {name} — {info['status']}")
+            print(f"  {'🟢' if info.get('ouvert') else '⚪'} {name} — {info.get('status', '?')}")
 
-        if info["ouvert"] and not was_ouvert:
+        if info.get("ouvert") and not was_ouvert:
             print(f"\n  🎉🎉🎉 OUVERTURE DÉTECTÉE : {name} !")
-            print(f"      Dates : {info['dates']}")
-            print(f"      Clôture : {info['cloture']}")
-            print(f"      URL : {info['url']}")
+            print(f"      Dates : {info.get('dates', '?')}")
+            print(f"      Clôture : {info.get('cloture', '?')}")
+            print(f"      URL : {info.get('url', '?')}")
             ok = send_ntfy(
                 title="🏇 Engagements OUVERTS !",
                 message=f"{name}\nConcours N° {cid}\nDates : {info.get('dates') or '?'}\nClôture : {info.get('cloture') or '?'}",
-                url=info["url"], priority=5,
+                url=info.get("url", ""), priority=5,
             )
             if ok:
                 print(f"  📱 Notification envoyée !")
             print()
-        elif info["status_code"] != prev_code and prev_code != "INCONNU":
-            print(f"      ↻ Changement : {prev.get('status', '?')} → {info['status']}")
+        elif info.get("status_code", "INCONNU") != prev_code and prev_code != "INCONNU":
+            print(f"      ↻ Changement : {prev.get('status', '?')} → {info.get('status', '?')}")
 
-        if info["status_code"] != prev_code or info["ouvert"] != was_ouvert:
+        if info.get("status_code") != prev_code or info.get("ouvert") != was_ouvert:
             changes = True
 
         state[cid] = {
-            "status_code": info["status_code"], "status": info["status"],
-            "ouvert": info["ouvert"], "name": info["name"],
-            "dates": info["dates"], "cloture": info["cloture"],
+            "status_code": info.get("status_code", "INCONNU"),
+            "status": info.get("status", "Inconnu"),
+            "ouvert": info.get("ouvert", False),
+            "name": info.get("name", ""),
+            "dates": info.get("dates", ""),
+            "cloture": info.get("cloture", ""),
             "last_check": now,
         }
-
-        time.sleep(random.uniform(1, 4))
 
     save_state(state)
     if changes:
