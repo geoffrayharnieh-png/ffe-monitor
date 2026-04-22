@@ -162,6 +162,17 @@ def fetch_all_concours(concours_list: list) -> dict:
                     "class=\"navbar" in content_lower):
                     print(f"  ✅ Cloudflare résolu en {(i+1)*2}s")
                     cf_passed = True
+
+                    # Debug : afficher le titre et les cookies
+                    title = page.title()
+                    cookies = context.cookies()
+                    cookie_names = [c["name"] for c in cookies]
+                    print(f"      Titre page : {title}")
+                    print(f"      Cookies ({len(cookies)}) : {cookie_names}")
+                    cf_cookie = [c for c in cookies if "cf_" in c["name"]]
+                    if cf_cookie:
+                        for c in cf_cookie:
+                            print(f"      🔑 {c['name']} = {c['value'][:20]}... (domain={c.get('domain','?')})")
                     break
 
                 # Tenter de cliquer Turnstile si présent
@@ -221,6 +232,25 @@ def fetch_all_concours(concours_list: list) -> dict:
 
                 if html.get("error"):
                     print(f"  ⚠ {cid} — fetch error: {html['error']}")
+                    # Debug: essayer aussi via page.goto pour comparer
+                    print(f"      Debug: tentative page.goto()...")
+                    try:
+                        page.goto(url, wait_until="domcontentloaded", timeout=15000)
+                        time.sleep(5)
+                        goto_html = page.content()
+                        has_card = "card-header" in goto_html.lower()
+                        has_cf = "cloudflare" in goto_html.lower()
+                        print(f"      goto result: {len(goto_html)} chars, card-header={has_card}, cloudflare={has_cf}")
+                        if has_card:
+                            # Ça marche via goto ! Parser cette page
+                            results[cid] = parse_concours_html(goto_html, cid)
+                            time.sleep(random.uniform(1, 3))
+                            continue
+                        # Revenir à l'accueil pour le prochain
+                        page.goto("https://ffecompet.ffe.com/", wait_until="domcontentloaded", timeout=15000)
+                        time.sleep(3)
+                    except Exception as goto_e:
+                        print(f"      goto aussi échoué: {goto_e}")
                     results[cid] = {
                         "id": cid, "url": url, "name": "", "status_code": "INCONNU",
                         "status": "Inconnu", "ouvert": False, "dates": "", "cloture": "",
