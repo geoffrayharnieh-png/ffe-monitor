@@ -16,12 +16,15 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Install dependencies
+      - name: Install Chrome
         run: |
-          pip install requests beautifulsoup4 playwright
-          playwright install chromium
-          playwright install-deps chromium
-          sudo apt-get install -y xvfb
+          wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | sudo gpg --dearmor -o /usr/share/keyrings/google-chrome.gpg
+          echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome.gpg] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list
+          sudo apt-get update
+          sudo apt-get install -y google-chrome-stable xvfb
+
+      - name: Install Python dependencies
+        run: pip install requests beautifulsoup4 selenium undetected-chromedriver
 
       - name: Restore state
         uses: actions/cache/restore@v4
