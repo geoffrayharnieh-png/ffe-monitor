@@ -171,10 +171,12 @@ def fetch_all_concours(concours_list: list) -> dict:
             url = f"{CONCOURS_URL}{cid}"
 
             try:
-                page.goto(url, timeout=20000)
-                # Attendre que le contenu se charge
-                page.wait_for_load_state("networkidle", timeout=15000)
-                time.sleep(2)
+                page.goto(url, wait_until="domcontentloaded", timeout=30000)
+                # Attendre que le card-header apparaisse (signe que la page est chargée)
+                try:
+                    page.wait_for_selector("div.card-header", timeout=10000)
+                except Exception:
+                    time.sleep(5)  # fallback : attendre 5s
 
                 html = page.content()
 
