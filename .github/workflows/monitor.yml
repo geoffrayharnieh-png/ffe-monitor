@@ -16,15 +16,8 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Install Chrome
-        run: |
-          wget -q https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
-          sudo apt-get install -y ./google-chrome-stable_current_amd64.deb xvfb || true
-          sudo apt-get install -f -y
-          google-chrome --version
-
-      - name: Install Python dependencies
-        run: pip install requests beautifulsoup4 selenium undetected-chromedriver setuptools
+      - name: Install dependencies
+        run: pip install requests beautifulsoup4
 
       - name: Restore state
         uses: actions/cache/restore@v4
@@ -36,7 +29,8 @@ jobs:
       - name: Run monitor
         env:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
-        run: xvfb-run --auto-servernum python monitor.py
+          PROXY_URL: ${{ secrets.PROXY_URL }}
+        run: python monitor.py
 
       - name: Save state
         uses: actions/cache/save@v4
