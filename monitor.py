@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """
-FFE Compet Monitor — undetected-chromedriver + Selenium
-========================================================
-Utilise undetected-chromedriver pour contourner Cloudflare.
-Ce driver patche Chrome en profondeur (supprime cdc_, modifie
-le binaire) pour être indétectable.
+FFE Compet Monitor — Version Cloud (requests + proxy résidentiel)
+==================================================================
+Simple et efficace : requests + proxy Webshare résidentiel français.
+Pas de navigateur, pas de Selenium, pas de Playwright.
 """
 
 import json
@@ -18,16 +17,25 @@ from pathlib import Path
 
 import requests
 from bs4 import BeautifulSoup
-import undetected_chromedriver as uc
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
 
 # ─── Configuration ────────────────────────────────────────────────────────────
 CONCOURS_URL  = "https://ffecompet.ffe.com/concours/"
 CONCOURS_FILE = Path(__file__).parent / "concours.json"
 STATE_FILE    = Path(__file__).parent / "state.json"
 NTFY_TOPIC    = os.environ.get("NTFY_TOPIC", "")
+PROXY_URL     = os.environ.get("PROXY_URL", "")  # http://user:pass@p.webshare.io:80
+
+HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/124.0.0.0 Safari/537.36"
+    ),
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "fr-FR,fr;q=0.9",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Referer": "https://ffecompet.ffe.com/",
+}
 
 STATUS_MAP = {
     "ouvert aux engagements": ("OUVERT",     "Ouvert aux engagements"),
@@ -40,7 +48,7 @@ STATUS_MAP = {
 }
 
 
-# ─── Parsing ──────────────────────────────────────────────────────────────────
+# ─── Scraping ─────────────────────────────────────────────────────────────────
 def detect_status(text: str) -> tuple:
     lower = text.lower()
     for pattern, (code, label) in STATUS_MAP.items():
@@ -49,7 +57,7 @@ def detect_status(text: str) -> tuple:
     return "INCONNU", "Inconnu"
 
 
-def parse_concours_html(html: str, cid: str) -> dict:
+def fetch_concours(session: requests.Session, cid: str) -> dict:
     url = f"{CONCOURS_URL}{cid}"
     info = {
         "id": cid, "url": url, "name": "", "status_code": "INCONNU",
@@ -58,8 +66,23 @@ def parse_concours_html(html: str, cid: str) -> dict:
         "checked_at": datetime.now().strftime("%d/%m %H:%M:%S"),
     }
 
+    try:
+        resp = session.get(url, timeout=20)
+        resp.raise_for_status()
+    except Exception as e:
+        info["error"] = str(e)[:120]
+        return info
+
+    html = resp.text
+
+    # Vérifier qu'on n'est pas sur une page Cloudflare
+    if len(html) < 1000 or "challenge-platform" in html.lower() or "just a moment" in html.lower():
+        info["error"] = f"Cloudflare bloqué ({len(html)} chars)"
+        return info
+
     soup = BeautifulSoup(html, "html.parser")
 
+    # ── Header : nom + statut ──
     header = soup.find("div", class_="card-header")
     if not header:
         for el in soup.find_all(string=re.compile(r"concours\s*N", re.I)):
@@ -86,6 +109,7 @@ def parse_concours_html(html: str, cid: str) -> dict:
                     info["ouvert"] = (code == "OUVERT")
                     break
 
+    # ── Body : dates + clôture ──
     body = soup.find("div", class_="card-body") or soup
     text = body.get_text(separator="\n", strip=True)
 
@@ -97,12 +121,14 @@ def parse_concours_html(html: str, cid: str) -> dict:
     if m:
         info["cloture"] = m.group(1)
 
+    # ── Fallback statut (header uniquement) ──
     if info["status_code"] == "INCONNU" and header:
         code, label = detect_status(header.get_text(separator=" "))
         info["status_code"] = code
         info["status"] = label
         info["ouvert"] = (code == "OUVERT")
 
+    # ── Épreuves ──
     rows = soup.find_all("tr")
     count = sum(1 for r in rows if len(r.find_all("td")) >= 5)
     if count:
@@ -114,152 +140,6 @@ def parse_concours_html(html: str, cid: str) -> dict:
             info["name"] = t.get_text(strip=True).split("-")[0].strip()
 
     return info
-
-
-# ─── Selenium + undetected-chromedriver ───────────────────────────────────────
-def wait_for_cloudflare(driver, timeout=60):
-    """Attend que le challenge Cloudflare se résolve."""
-    print(f"      Attente résolution Cloudflare (max {timeout}s)...")
-    start = time.time()
-    while time.time() - start < timeout:
-        try:
-            source = driver.page_source.lower()
-            title = driver.title.lower()
-
-            # La page FFE est chargée si on voit ces éléments
-            if ("card-header" in source or
-                "recherche concours" in source or
-                "recherche cheval" in source or
-                "ffecompet" in title):
-                if "challenge" not in source or "card-header" in source:
-                    elapsed = time.time() - start
-                    print(f"      ✅ Page chargée en {elapsed:.0f}s")
-                    return True
-
-            # Toujours sur la page Cloudflare "Un instant..."
-            if "un instant" in source or "challenge-platform" in source:
-                time.sleep(2)
-                continue
-
-            # Page chargée mais pas de marqueur FFE connu
-            if len(source) > 5000 and "cloudflare" not in source:
-                elapsed = time.time() - start
-                print(f"      ✅ Page chargée en {elapsed:.0f}s (contenu inconnu)")
-                return True
-
-        except Exception:
-            pass
-
-        time.sleep(2)
-
-    print(f"      ❌ Timeout après {timeout}s")
-    return False
-
-
-def fetch_all_concours(concours_list: list) -> dict:
-    """Lance Chrome non détecté, passe Cloudflare, scrape chaque concours."""
-    results = {}
-
-    # ── Configurer Chrome avec undetected-chromedriver ──
-    options = uc.ChromeOptions()
-    options.add_argument("--no-sandbox")
-    options.add_argument("--disable-dev-shm-usage")
-    options.add_argument("--window-size=1920,1080")
-    options.add_argument("--disable-infobars")
-    options.add_argument("--lang=fr-FR")
-
-    print("  🌐 Lancement de Chrome (undetected)...")
-
-    try:
-        driver = uc.Chrome(options=options, headless=False)
-    except Exception as e:
-        print(f"  ❌ Impossible de lancer Chrome : {e}")
-        # Essayer en headless si headed échoue
-        try:
-            driver = uc.Chrome(options=options, headless=True)
-            print("  ⚠ Fallback en headless")
-        except Exception as e2:
-            print(f"  ❌ Chrome headless aussi échoué : {e2}")
-            return results
-
-    try:
-        # ── Étape 1 : Passer Cloudflare sur la page d'accueil ──
-        print("  🌐 Navigation vers ffecompet.ffe.com...")
-        driver.get("https://ffecompet.ffe.com/")
-
-        if not wait_for_cloudflare(driver, timeout=45):
-            # Debug
-            source = driver.page_source
-            clean = re.sub(r'<[^>]+>', ' ', source[:600]).strip()
-            print(f"  ❌ Cloudflare non résolu sur l'accueil")
-            print(f"     Titre: {driver.title}")
-            print(f"     Contenu: {clean[:300]}")
-            driver.quit()
-            return results
-
-        # Debug : cookies
-        cookies = driver.get_cookies()
-        cookie_names = [c["name"] for c in cookies]
-        print(f"  🔑 Cookies : {cookie_names}")
-        cf_cookies = [c for c in cookies if "cf_" in c["name"].lower()]
-        for c in cf_cookies:
-            print(f"     {c['name']} = {c['value'][:30]}...")
-
-        time.sleep(random.uniform(2, 4))
-
-        # ── Étape 2 : Visiter chaque concours ──
-        for cid in concours_list:
-            cid = str(cid).strip()
-            url = f"{CONCOURS_URL}{cid}"
-
-            print(f"\n  📄 Chargement concours {cid}...")
-            try:
-                driver.get(url)
-
-                if wait_for_cloudflare(driver, timeout=45):
-                    html = driver.page_source
-
-                    if "card-header" in html.lower() or len(html) > 10000:
-                        results[cid] = parse_concours_html(html, cid)
-                    else:
-                        print(f"      ⚠ Page chargée mais pas de card-header")
-                        clean = re.sub(r'<[^>]+>', ' ', html[:500]).strip()
-                        print(f"      Contenu: {clean[:200]}")
-                        results[cid] = {
-                            "id": cid, "url": url, "name": "", "status_code": "INCONNU",
-                            "status": "Inconnu", "ouvert": False, "dates": "", "cloture": "",
-                            "epreuves": 0, "error": "Contenu inattendu",
-                            "checked_at": datetime.now().strftime("%d/%m %H:%M:%S"),
-                        }
-                else:
-                    source = driver.page_source
-                    clean = re.sub(r'<[^>]+>', ' ', source[:500]).strip()
-                    print(f"      Contenu: {clean[:200]}")
-                    results[cid] = {
-                        "id": cid, "url": url, "name": "", "status_code": "INCONNU",
-                        "status": "Inconnu", "ouvert": False, "dates": "", "cloture": "",
-                        "epreuves": 0, "error": "Cloudflare bloqué",
-                        "checked_at": datetime.now().strftime("%d/%m %H:%M:%S"),
-                    }
-
-            except Exception as e:
-                print(f"      ❌ Exception: {e}")
-                results[cid] = {
-                    "id": cid, "url": url, "name": "", "status_code": "INCONNU",
-                    "status": "Inconnu", "ouvert": False, "dates": "", "cloture": "",
-                    "epreuves": 0, "error": str(e)[:120],
-                    "checked_at": datetime.now().strftime("%d/%m %H:%M:%S"),
-                }
-
-            time.sleep(random.uniform(2, 5))
-
-    finally:
-        try:
-            driver.quit()
-        except Exception:
-            pass
-
-    return results
 
 
 # ─── Notifications ntfy ──────────────────────────────────────────────────────
@@ -318,13 +198,21 @@ def main():
 
     state = load_state()
 
+    # Configurer la session avec proxy
+    session = requests.Session()
+    session.headers.update(HEADERS)
+
+    if PROXY_URL:
+        session.proxies = {"http": PROXY_URL, "https": PROXY_URL}
+        print(f"  🔀 Proxy résidentiel configuré")
+    else:
+        print(f"  ⚠ Pas de proxy configuré (PROXY_URL vide)")
+
     print(f"\n📋 {len(concours_list)} concours à vérifier")
 
     jitter = random.uniform(0, 10)
     print(f"   ⏳ Délai initial : {jitter:.0f}s\n")
     time.sleep(jitter)
-
-    all_results = fetch_all_concours(concours_list)
 
     changes = False
 
@@ -334,23 +222,27 @@ def main():
         was_ouvert = prev.get("ouvert", False)
         prev_code = prev.get("status_code", "INCONNU")
 
-        info = all_results.get(cid, {})
+        info = fetch_concours(session, cid)
         name = info.get("name") or f"Fiche Concours n°{cid}"
 
         if info.get("error"):
             print(f"  ⚠ {name} — Erreur : {info['error']}")
         else:
-            print(f"  {'🟢' if info.get('ouvert') else '⚪'} {name} — {info.get('status', '?')}")
+            print(f"  {'🟢' if info['ouvert'] else '⚪'} {name} — {info['status']}")
 
-        if info.get("ouvert") and not was_ouvert:
+        if info["ouvert"] and not was_ouvert:
             print(f"\n  🎉🎉🎉 OUVERTURE DÉTECTÉE : {name} !")
+            print(f"      Dates : {info.get('dates', '?')}")
+            print(f"      Clôture : {info.get('cloture', '?')}")
+            print(f"      URL : {info['url']}")
             ok = send_ntfy(
                 title="🏇 Engagements OUVERTS !",
                 message=f"{name}\nConcours N° {cid}\nDates : {info.get('dates') or '?'}\nClôture : {info.get('cloture') or '?'}",
-                url=info.get("url", ""), priority=5,
+                url=info["url"], priority=5,
             )
             if ok:
                 print(f"  📱 Notification envoyée !")
+            print()
         elif info.get("status_code", "INCONNU") != prev_code and prev_code != "INCONNU":
             print(f"      ↻ Changement : {prev.get('status', '?')} → {info.get('status', '?')}")
 
@@ -366,6 +258,8 @@ def main():
             "cloture": info.get("cloture", ""),
             "last_check": now,
         }
+
+        time.sleep(random.uniform(1, 4))
 
     save_state(state)
     if changes:
