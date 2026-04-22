@@ -123,9 +123,11 @@ def fetch_all_concours(concours_list: list) -> dict:
 
     with sync_playwright() as p:
         browser = p.chromium.launch(
-            headless=True,
+            headless=False,  # Mode headed avec Xvfb — Cloudflare ne détecte pas
             args=["--no-sandbox", "--disable-dev-shm-usage",
-                  "--disable-blink-features=AutomationControlled"],
+                  "--disable-blink-features=AutomationControlled",
+                  "--disable-infobars",
+                  "--window-size=1920,1080"],
         )
 
         context = browser.new_context(
@@ -141,7 +143,9 @@ def fetch_all_concours(concours_list: list) -> dict:
 
         context.add_init_script("""
             Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
-            Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3]});
+            Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]});
+            Object.defineProperty(navigator, 'languages', {get: () => ['fr-FR', 'fr', 'en']});
+            window.chrome = { runtime: {} };
         """)
 
         page = context.new_page()
@@ -175,7 +179,7 @@ def fetch_all_concours(concours_list: list) -> dict:
 
                 # Attendre que Cloudflare se résolve sur cette page aussi
                 resolved = False
-                for attempt in range(20):  # max 40 secondes
+                for attempt in range(25):  # max 50 secondes
                     html = page.content()
                     html_lower = html.lower()
 
@@ -184,10 +188,25 @@ def fetch_all_concours(concours_list: list) -> dict:
                         resolved = True
                         break
 
-                    # Si pas de challenge Cloudflare mais page courte, attendre un peu
+                    # Si page normale sans challenge
                     if "challenge" not in html_lower and "cloudflare" not in html_lower and len(html) > 1000:
                         resolved = True
                         break
+
+                    # Tenter de cliquer sur le widget Turnstile (checkbox Cloudflare)
+                    if attempt in (3, 6, 10):
+                        try:
+                            # Le Turnstile est souvent dans une iframe
+                            for frame in page.frames:
+                                checkbox = frame.query_selector("input[type='checkbox']") or \
+                                           frame.query_selector(".cf-turnstile") or \
+                                           frame.query_selector("#challenge-stage")
+                                if checkbox:
+                                    checkbox.click()
+                                    print(f"      🖱 Clic Turnstile tenté (attempt {attempt})")
+                                    break
+                        except Exception:
+                            pass
 
                     time.sleep(2)
 
