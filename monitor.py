@@ -158,14 +158,62 @@ def fetch_all_concours(concours_list: list) -> dict:
             timezone_id="Europe/Paris",
         )
 
-        context.add_init_script("""
-            Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
-            Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]});
-            Object.defineProperty(navigator, 'languages', {get: () => ['fr-FR', 'fr', 'en']});
-            window.chrome = { runtime: {} };
-        """)
+        # Appliquer playwright-stealth si disponible
+        try:
+            from playwright_stealth import stealth_sync
+            page = context.new_page()
+            stealth_sync(page)
+            print("  🥷 Stealth mode activé (playwright-stealth)")
+        except ImportError:
+            # Fallback : stealth manuelle
+            context.add_init_script("""
+                // Masquer webdriver
+                Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+                delete navigator.__proto__.webdriver;
 
-        page = context.new_page()
+                // Plugins réalistes
+                Object.defineProperty(navigator, 'plugins', {
+                    get: () => {
+                        const plugins = [
+                            {name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer'},
+                            {name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai'},
+                            {name: 'Native Client', filename: 'internal-nacl-plugin'}
+                        ];
+                        plugins.length = 3;
+                        return plugins;
+                    }
+                });
+
+                // Languages
+                Object.defineProperty(navigator, 'languages', {get: () => ['fr-FR', 'fr', 'en-US', 'en']});
+
+                // Chrome runtime
+                window.chrome = {
+                    runtime: {
+                        onMessage: {addListener: () => {}, removeListener: () => {}},
+                        sendMessage: () => {},
+                        connect: () => ({onMessage: {addListener: () => {}}, postMessage: () => {}})
+                    },
+                    loadTimes: () => ({})
+                };
+
+                // Permission
+                const originalQuery = window.navigator.permissions.query;
+                window.navigator.permissions.query = (parameters) =>
+                    parameters.name === 'notifications'
+                        ? Promise.resolve({state: Notification.permission})
+                        : originalQuery(parameters);
+
+                // WebGL vendor
+                const getParameter = WebGLRenderingContext.prototype.getParameter;
+                WebGLRenderingContext.prototype.getParameter = function(parameter) {
+                    if (parameter === 37445) return 'Intel Inc.';
+                    if (parameter === 37446) return 'Intel Iris OpenGL Engine';
+                    return getParameter.apply(this, arguments);
+                };
+            """)
+            page = context.new_page()
+            print("  🥷 Stealth mode activé (manuelle)")
 
         # ── Passer Cloudflare sur la page d'accueil ──
         print("  🌐 Résolution Cloudflare (via proxy résidentiel)...")
@@ -217,7 +265,7 @@ def fetch_all_concours(concours_list: list) -> dict:
 
                 # Attendre résolution Cloudflare sur cette page
                 resolved = False
-                for attempt in range(25):
+                for attempt in range(30):  # 60 seconds max
                     html = page.content()
                     html_lower = html.lower()
 
@@ -227,9 +275,47 @@ def fetch_all_concours(concours_list: list) -> dict:
                     if ("challenge" not in html_lower and
                         "cloudflare" not in html_lower and
                         "just a moment" not in html_lower and
+                        "un instant" not in html_lower and
                         len(html) > 2000):
                         resolved = True
                         break
+
+                    # Toutes les 4 secondes, tenter de cliquer le Turnstile
+                    if attempt % 2 == 1:
+                        try:
+                            # Chercher l'iframe Turnstile
+                            for frame in page.frames:
+                                frame_url = frame.url or ""
+                                if "challenges.cloudflare.com" in frame_url or "turnstile" in frame_url:
+                                    # Cliquer au centre de l'iframe (la checkbox)
+                                    try:
+                                        checkbox = frame.query_selector("input[type='checkbox']")
+                                        if checkbox:
+                                            checkbox.click()
+                                            print(f"      🖱 Clic checkbox Turnstile (attempt {attempt})")
+                                    except Exception:
+                                        pass
+                                    # Ou cliquer sur n'importe quel élément cliquable
+                                    try:
+                                        body = frame.query_selector("body")
+                                        if body:
+                                            body.click()
+                                            print(f"      🖱 Clic body iframe Turnstile (attempt {attempt})")
+                                    except Exception:
+                                        pass
+                                    break
+
+                            # Aussi essayer de cliquer sur l'iframe elle-même
+                            iframes = page.query_selector_all("iframe")
+                            for iframe in iframes:
+                                src = iframe.get_attribute("src") or ""
+                                if "challenges" in src or "turnstile" in src:
+                                    iframe.click()
+                                    print(f"      🖱 Clic iframe element (attempt {attempt})")
+                                    break
+                        except Exception:
+                            pass
+
                     time.sleep(2)
 
                 if resolved:
