@@ -16,6 +16,7 @@ from datetime import datetime
 from pathlib import Path
 
 import requests
+from curl_cffi import requests as cffi_requests
 from bs4 import BeautifulSoup
 
 # ─── Configuration ────────────────────────────────────────────────────────────
@@ -67,7 +68,9 @@ def fetch_concours(session: requests.Session, cid: str) -> dict:
     }
 
     try:
-        resp = session.get(url, timeout=20)
+        resp = session.get(url, timeout=20, headers={
+            "Referer": "https://ffecompet.ffe.com/",
+        })
         resp.raise_for_status()
     except Exception as e:
         info["error"] = str(e)[:120]
@@ -198,13 +201,12 @@ def main():
 
     state = load_state()
 
-    # Configurer la session avec proxy
-    session = requests.Session()
-    session.headers.update(HEADERS)
+    # Configurer la session avec proxy + fingerprint Chrome
+    session = cffi_requests.Session(impersonate="chrome")
 
     if PROXY_URL:
         session.proxies = {"http": PROXY_URL, "https": PROXY_URL}
-        print(f"  🔀 Proxy résidentiel configuré")
+        print(f"  🔀 Proxy résidentiel + fingerprint Chrome configurés")
     else:
         print(f"  ⚠ Pas de proxy configuré (PROXY_URL vide)")
 
