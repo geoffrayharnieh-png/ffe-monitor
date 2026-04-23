@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """
-FFE Compet Monitor — Version Cloud (requests + proxy résidentiel)
-==================================================================
-Simple et efficace : requests + proxy Webshare résidentiel français.
-Pas de navigateur, pas de Selenium, pas de Playwright.
+FFE Compet Monitor — Playwright + Proxy Résidentiel
+=====================================================
+Chrome headless sur GitHub Actions, trafic routé via proxy
+résidentiel français → Cloudflare voit un vrai navigateur
+depuis une IP résidentielle française.
 """
 
 import json
@@ -15,8 +16,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-import requests
-from curl_cffi import requests as cffi_requests
+import requests  # pour ntfy uniquement
 from bs4 import BeautifulSoup
 
 # ─── Configuration ────────────────────────────────────────────────────────────
@@ -25,18 +25,6 @@ CONCOURS_FILE = Path(__file__).parent / "concours.json"
 STATE_FILE    = Path(__file__).parent / "state.json"
 NTFY_TOPIC    = os.environ.get("NTFY_TOPIC", "")
 PROXY_URL     = os.environ.get("PROXY_URL", "")  # http://user:pass@p.webshare.io:80
-
-HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/124.0.0.0 Safari/537.36"
-    ),
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    "Accept-Language": "fr-FR,fr;q=0.9",
-    "Accept-Encoding": "gzip, deflate, br",
-    "Referer": "https://ffecompet.ffe.com/",
-}
 
 STATUS_MAP = {
     "ouvert aux engagements": ("OUVERT",     "Ouvert aux engagements"),
@@ -49,7 +37,7 @@ STATUS_MAP = {
 }
 
 
-# ─── Scraping ─────────────────────────────────────────────────────────────────
+# ─── Parsing ──────────────────────────────────────────────────────────────────
 def detect_status(text: str) -> tuple:
     lower = text.lower()
     for pattern, (code, label) in STATUS_MAP.items():
@@ -58,7 +46,7 @@ def detect_status(text: str) -> tuple:
     return "INCONNU", "Inconnu"
 
 
-def fetch_concours(session: requests.Session, cid: str) -> dict:
+def parse_concours_html(html: str, cid: str) -> dict:
     url = f"{CONCOURS_URL}{cid}"
     info = {
         "id": cid, "url": url, "name": "", "status_code": "INCONNU",
@@ -67,25 +55,8 @@ def fetch_concours(session: requests.Session, cid: str) -> dict:
         "checked_at": datetime.now().strftime("%d/%m %H:%M:%S"),
     }
 
-    try:
-        resp = session.get(url, timeout=20, headers={
-            "Referer": "https://ffecompet.ffe.com/",
-        })
-        resp.raise_for_status()
-    except Exception as e:
-        info["error"] = str(e)[:120]
-        return info
-
-    html = resp.text
-
-    # Vérifier qu'on n'est pas sur une page Cloudflare
-    if len(html) < 1000 or "challenge-platform" in html.lower() or "just a moment" in html.lower():
-        info["error"] = f"Cloudflare bloqué ({len(html)} chars)"
-        return info
-
     soup = BeautifulSoup(html, "html.parser")
 
-    # ── Header : nom + statut ──
     header = soup.find("div", class_="card-header")
     if not header:
         for el in soup.find_all(string=re.compile(r"concours\s*N", re.I)):
@@ -112,7 +83,6 @@ def fetch_concours(session: requests.Session, cid: str) -> dict:
                     info["ouvert"] = (code == "OUVERT")
                     break
 
-    # ── Body : dates + clôture ──
     body = soup.find("div", class_="card-body") or soup
     text = body.get_text(separator="\n", strip=True)
 
@@ -124,14 +94,12 @@ def fetch_concours(session: requests.Session, cid: str) -> dict:
     if m:
         info["cloture"] = m.group(1)
 
-    # ── Fallback statut (header uniquement) ──
     if info["status_code"] == "INCONNU" and header:
         code, label = detect_status(header.get_text(separator=" "))
         info["status_code"] = code
         info["status"] = label
         info["ouvert"] = (code == "OUVERT")
 
-    # ── Épreuves ──
     rows = soup.find_all("tr")
     count = sum(1 for r in rows if len(r.find_all("td")) >= 5)
     if count:
@@ -143,6 +111,155 @@ def fetch_concours(session: requests.Session, cid: str) -> dict:
             info["name"] = t.get_text(strip=True).split("-")[0].strip()
 
     return info
+
+
+# ─── Parse proxy URL ─────────────────────────────────────────────────────────
+def parse_proxy_url(proxy_url: str) -> dict:
+    """Parse http://user:pass@host:port into Playwright proxy config."""
+    m = re.match(r"https?://([^:]+):([^@]+)@([^:]+):(\d+)", proxy_url)
+    if m:
+        return {
+            "server": f"http://{m.group(3)}:{m.group(4)}",
+            "username": m.group(1),
+            "password": m.group(2),
+        }
+    return {}
+
+
+# ─── Playwright + Proxy ──────────────────────────────────────────────────────
+def fetch_all_concours(concours_list: list) -> dict:
+    from playwright.sync_api import sync_playwright
+
+    results = {}
+    proxy_config = parse_proxy_url(PROXY_URL) if PROXY_URL else None
+
+    with sync_playwright() as p:
+        # Lancer Chrome avec le proxy résidentiel
+        launch_args = {
+            "headless": False,
+            "args": ["--no-sandbox", "--disable-dev-shm-usage",
+                     "--disable-blink-features=AutomationControlled",
+                     "--disable-infobars", "--window-size=1920,1080"],
+        }
+        if proxy_config:
+            launch_args["proxy"] = proxy_config
+            print(f"  🔀 Proxy : {proxy_config['server']} (user: {proxy_config['username'][:8]}...)")
+
+        browser = p.chromium.launch(**launch_args)
+
+        context = browser.new_context(
+            viewport={"width": 1920, "height": 1080},
+            user_agent=(
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/124.0.0.0 Safari/537.36"
+            ),
+            locale="fr-FR",
+            timezone_id="Europe/Paris",
+        )
+
+        context.add_init_script("""
+            Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+            Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]});
+            Object.defineProperty(navigator, 'languages', {get: () => ['fr-FR', 'fr', 'en']});
+            window.chrome = { runtime: {} };
+        """)
+
+        page = context.new_page()
+
+        # ── Passer Cloudflare sur la page d'accueil ──
+        print("  🌐 Résolution Cloudflare (via proxy résidentiel)...")
+        cf_passed = False
+        try:
+            page.goto("https://ffecompet.ffe.com/", timeout=60000)
+            for i in range(30):
+                content = page.content().lower()
+                if ("recherche concours" in content or
+                    "recherche cheval" in content or
+                    "class=\"navbar" in content):
+                    print(f"  ✅ Cloudflare résolu en {(i+1)*2}s")
+                    cf_passed = True
+
+                    # Debug cookies
+                    cookies = context.cookies()
+                    cookie_names = [c["name"] for c in cookies]
+                    print(f"  🔑 Cookies : {cookie_names}")
+                    cf_cookies = [c for c in cookies if "cf_" in c["name"].lower()]
+                    if cf_cookies:
+                        for c in cf_cookies:
+                            print(f"     {c['name']} = {c['value'][:30]}...")
+                    break
+                time.sleep(2)
+
+            if not cf_passed:
+                raw = re.sub(r'<[^>]+>', ' ', page.content()[:600]).strip()
+                print(f"  ❌ Cloudflare non résolu après 60s")
+                print(f"     Titre: {page.title()}")
+                print(f"     Contenu: {raw[:300]}")
+                browser.close()
+                return results
+
+        except Exception as e:
+            print(f"  ❌ Erreur : {e}")
+            browser.close()
+            return results
+
+        time.sleep(random.uniform(1, 3))
+
+        # ── Visiter chaque concours ──
+        for cid in concours_list:
+            cid = str(cid).strip()
+            url = f"{CONCOURS_URL}{cid}"
+            print(f"\n  📄 Concours {cid}...")
+
+            try:
+                page.goto(url, wait_until="domcontentloaded", timeout=30000)
+
+                # Attendre résolution Cloudflare sur cette page
+                resolved = False
+                for attempt in range(25):
+                    html = page.content()
+                    html_lower = html.lower()
+
+                    if "card-header" in html_lower or "concours n" in html_lower:
+                        resolved = True
+                        break
+                    if ("challenge" not in html_lower and
+                        "cloudflare" not in html_lower and
+                        "just a moment" not in html_lower and
+                        len(html) > 2000):
+                        resolved = True
+                        break
+                    time.sleep(2)
+
+                if resolved:
+                    html = page.content()
+                    results[cid] = parse_concours_html(html, cid)
+                else:
+                    raw = re.sub(r'<[^>]+>', ' ', page.content()[:500]).strip()
+                    print(f"      ⚠ Cloudflare bloqué ({len(page.content())} chars)")
+                    print(f"      Extrait: {raw[:200]}")
+                    results[cid] = {
+                        "id": cid, "url": url, "name": "", "status_code": "INCONNU",
+                        "status": "Inconnu", "ouvert": False, "dates": "", "cloture": "",
+                        "epreuves": 0, "error": "Cloudflare bloqué",
+                        "checked_at": datetime.now().strftime("%d/%m %H:%M:%S"),
+                    }
+
+            except Exception as e:
+                print(f"      ❌ {e}")
+                results[cid] = {
+                    "id": cid, "url": url, "name": "", "status_code": "INCONNU",
+                    "status": "Inconnu", "ouvert": False, "dates": "", "cloture": "",
+                    "epreuves": 0, "error": str(e)[:120],
+                    "checked_at": datetime.now().strftime("%d/%m %H:%M:%S"),
+                }
+
+            time.sleep(random.uniform(2, 5))
+
+        browser.close()
+
+    return results
 
 
 # ─── Notifications ntfy ──────────────────────────────────────────────────────
@@ -201,20 +318,13 @@ def main():
 
     state = load_state()
 
-    # Configurer la session avec proxy + fingerprint Chrome
-    session = cffi_requests.Session(impersonate="chrome")
-
-    if PROXY_URL:
-        session.proxies = {"http": PROXY_URL, "https": PROXY_URL}
-        print(f"  🔀 Proxy résidentiel + fingerprint Chrome configurés")
-    else:
-        print(f"  ⚠ Pas de proxy configuré (PROXY_URL vide)")
-
     print(f"\n📋 {len(concours_list)} concours à vérifier")
 
     jitter = random.uniform(0, 10)
     print(f"   ⏳ Délai initial : {jitter:.0f}s\n")
     time.sleep(jitter)
+
+    all_results = fetch_all_concours(concours_list)
 
     changes = False
 
@@ -224,23 +334,23 @@ def main():
         was_ouvert = prev.get("ouvert", False)
         prev_code = prev.get("status_code", "INCONNU")
 
-        info = fetch_concours(session, cid)
+        info = all_results.get(cid, {})
         name = info.get("name") or f"Fiche Concours n°{cid}"
 
         if info.get("error"):
             print(f"  ⚠ {name} — Erreur : {info['error']}")
         else:
-            print(f"  {'🟢' if info['ouvert'] else '⚪'} {name} — {info['status']}")
+            print(f"  {'🟢' if info.get('ouvert') else '⚪'} {name} — {info.get('status', '?')}")
 
-        if info["ouvert"] and not was_ouvert:
+        if info.get("ouvert") and not was_ouvert:
             print(f"\n  🎉🎉🎉 OUVERTURE DÉTECTÉE : {name} !")
             print(f"      Dates : {info.get('dates', '?')}")
             print(f"      Clôture : {info.get('cloture', '?')}")
-            print(f"      URL : {info['url']}")
+            print(f"      URL : {info.get('url', '?')}")
             ok = send_ntfy(
                 title="🏇 Engagements OUVERTS !",
                 message=f"{name}\nConcours N° {cid}\nDates : {info.get('dates') or '?'}\nClôture : {info.get('cloture') or '?'}",
-                url=info["url"], priority=5,
+                url=info.get("url", ""), priority=5,
             )
             if ok:
                 print(f"  📱 Notification envoyée !")
@@ -260,8 +370,6 @@ def main():
             "cloture": info.get("cloture", ""),
             "last_check": now,
         }
-
-        time.sleep(random.uniform(1, 4))
 
     save_state(state)
     if changes:
