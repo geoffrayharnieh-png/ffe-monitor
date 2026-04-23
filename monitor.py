@@ -266,7 +266,23 @@ def fetch_all_concours(concours_list: list) -> dict:
                 # Attendre résolution Cloudflare sur cette page
                 resolved = False
                 for attempt in range(30):  # 60 seconds max
-                    html = page.content()
+                    # Lire le contenu — peut échouer si la page navigue après un clic Turnstile
+                    try:
+                        html = page.content()
+                    except Exception:
+                        # La page est en train de naviguer → le clic Turnstile a marché !
+                        print(f"      ✅ Turnstile résolu ! Attente du chargement...")
+                        try:
+                            page.wait_for_load_state("domcontentloaded", timeout=15000)
+                            time.sleep(3)
+                            html = page.content()
+                            if "card-header" in html.lower() or len(html) > 5000:
+                                resolved = True
+                                break
+                        except Exception:
+                            time.sleep(3)
+                        continue
+
                     html_lower = html.lower()
 
                     if "card-header" in html_lower or "concours n" in html_lower:
@@ -280,41 +296,49 @@ def fetch_all_concours(concours_list: list) -> dict:
                         resolved = True
                         break
 
-                    # Toutes les 4 secondes, tenter de cliquer le Turnstile
+                    # Tenter de cliquer le Turnstile
                     if attempt % 2 == 1:
                         try:
-                            # Chercher l'iframe Turnstile
                             for frame in page.frames:
                                 frame_url = frame.url or ""
                                 if "challenges.cloudflare.com" in frame_url or "turnstile" in frame_url:
-                                    # Cliquer au centre de l'iframe (la checkbox)
                                     try:
                                         checkbox = frame.query_selector("input[type='checkbox']")
                                         if checkbox:
                                             checkbox.click()
-                                            print(f"      🖱 Clic checkbox Turnstile (attempt {attempt})")
+                                            print(f"      🖱 Clic checkbox (attempt {attempt})")
                                     except Exception:
                                         pass
-                                    # Ou cliquer sur n'importe quel élément cliquable
                                     try:
                                         body = frame.query_selector("body")
                                         if body:
                                             body.click()
-                                            print(f"      🖱 Clic body iframe Turnstile (attempt {attempt})")
+                                            print(f"      🖱 Clic body iframe (attempt {attempt})")
                                     except Exception:
                                         pass
                                     break
 
-                            # Aussi essayer de cliquer sur l'iframe elle-même
                             iframes = page.query_selector_all("iframe")
                             for iframe in iframes:
                                 src = iframe.get_attribute("src") or ""
                                 if "challenges" in src or "turnstile" in src:
                                     iframe.click()
-                                    print(f"      🖱 Clic iframe element (attempt {attempt})")
+                                    print(f"      🖱 Clic iframe (attempt {attempt})")
+                                    # Après le clic, attendre la navigation
+                                    time.sleep(3)
+                                    try:
+                                        page.wait_for_load_state("domcontentloaded", timeout=10000)
+                                        html = page.content()
+                                        if "card-header" in html.lower():
+                                            resolved = True
+                                    except Exception:
+                                        pass
                                     break
                         except Exception:
                             pass
+
+                        if resolved:
+                            break
 
                     time.sleep(2)
 
