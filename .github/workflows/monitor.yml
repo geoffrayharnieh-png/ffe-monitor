@@ -17,7 +17,11 @@ jobs:
           python-version: '3.12'
 
       - name: Install dependencies
-        run: pip install requests beautifulsoup4 curl_cffi curl_cffi
+        run: |
+          pip install requests beautifulsoup4 playwright
+          playwright install chromium
+          playwright install-deps chromium
+          sudo apt-get install -y xvfb
 
       - name: Restore state
         uses: actions/cache/restore@v4
@@ -30,7 +34,7 @@ jobs:
         env:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
           PROXY_URL: ${{ secrets.PROXY_URL }}
-        run: python monitor.py
+        run: xvfb-run --auto-servernum python monitor.py
 
       - name: Save state
         uses: actions/cache/save@v4
